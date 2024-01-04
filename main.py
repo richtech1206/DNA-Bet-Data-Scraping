@@ -14,185 +14,121 @@ import time
 from datetime import datetime
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # Function to ask for duration using Tkinter
 def ask_duration():
     ROOT = tk.Tk()
     ROOT.withdraw()
-    # The input dialog
-    USER_INP = simpledialog.askstring(title="Set Duration",
-                                      prompt="Enter Duration in Seconds:")
-    return int(USER_INP)  # Convert minutes to seconds
+    USER_INP = simpledialog.askstring(title="Set Duration", prompt="Enter Duration in Seconds:")
+    return int(USER_INP)
 
-def safe_append_to_worksheet(worksheet, data, max_retries=100, delay=5):
-    attempts = 0
-    while True:
+def safe_append_to_worksheet(worksheet, data, max_retries=5, delay=5):
+    for _ in range(max_retries):
         try:
             worksheet.append_row(data)
-            break  # Break the loop if successful
+            return
         except requests.exceptions.ConnectionError as e:
-            print(f"Connection error occurred: {e}. Retrying...")
-            time.sleep(delay)  # Wait for a while before retrying
-            attempts += 1
-    else:
-        print("Failed to append data after several retries.")
+            print(f"Connection error: {e}. Retrying...")
+            time.sleep(delay)
+    print("Failed to append data after retries.")
 
 def login_to_website(driver, username, password, login_url):
-    while True:
+    for _ in range(3):
         try:
             driver.get(login_url)
-            time.sleep(2)
-
-            # Find the username and password input fields and the submit button
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'login_username')))
             username_field = driver.find_element(By.ID, 'login_username')
             password_field = driver.find_element(By.ID, 'login_password')
             submit_button = driver.find_element(By.XPATH, '//button[@type="submit"]')
 
-            # Enter your login credentials
             username_field.send_keys(username)
             password_field.send_keys(password)
-
-            # Submit the form
             submit_button.click()
 
-            # Wait for the next page to load or for login to complete
-            time.sleep(5)
-
-            # Check if login was successful
+            WebDriverWait(driver, 10).until(EC.url_changes(login_url))
             if "login" not in driver.current_url.lower():
-                return True  # Successful login
-            else:
-                print("Login attempt failed. Retrying...")
-                time.sleep(5)  # Wait before retrying
-
+                return True
+            time.sleep(10)
+        except TimeoutException as e:
+            print(f"Login timeout: {e}. Retrying...")
         except Exception as e:
-            print(f"An error occurred during login: {e}")
-
-    print("Failed to log in.")
+            print(f"Login error: {e}")
     return False
 
-# Set duration time
-duration = ask_duration()
+def init_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    service = Service(executable_path='chromedriver.exe')
+    return webdriver.Chrome(service=service, options=chrome_options)
 
-# Load environment variables from the .env file
-dotenv.load_dotenv()
+def main():
+    total_data = [["Data Time", "Huay 264", "Huay VIP 264", "LTO 264", "LTO VIP 264", "ชัดเจน 264", "ชัดเจน VIP 264"]]
+    duration = ask_duration()
+    dotenv.load_dotenv()
+    google_credentials_path = os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH')
+    if not google_credentials_path:
+        raise ValueError("Google Sheets credentials path is not set.")
 
-# Load Google Sheets credentials from environment variable
-google_credentials_path = os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH')
-if not google_credentials_path:
-    raise ValueError("The Google Sheets credentials path is not set in the environment variables")
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(google_credentials_path, scope)
+    client = gspread.authorize(creds)
 
-# Set the scope and credentials for Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(google_credentials_path, scope)
-client = gspread.authorize(creds)
+    sheet_url = "https://docs.google.com/spreadsheets/d/1r_96ut4UIoDEkSYQqyaSCNKppQwR7VyXZPn-lWOKcvI/edit?usp=sharing"
+    spreadsheet = client.open_by_url(sheet_url)
+    worksheet = spreadsheet.get_worksheet(0) or spreadsheet.add_worksheet(title="Sheet1", rows="100", cols="20")
 
-# Open the Google Spreadsheet by title
-sheet_url = "https://docs.google.com/spreadsheets/d/1r_96ut4UIoDEkSYQqyaSCNKppQwR7VyXZPn-lWOKcvI/edit?usp=sharing"
-spreadsheet = client.open_by_url(sheet_url)
+    header_names = ["Data Time", "Huay 264", "Huay VIP 264", "LTO 264", "LTO VIP 264", "ชัดเจน 264", "ชัดเจน VIP 264"]
+    if not worksheet.row_values(1):
+        worksheet.insert_row(header_names, index=1)
 
-# Get the worksheet by name
-worksheet_name = "Sheet1"
-worksheet = spreadsheet.get_worksheet(0)
+    driver = init_driver()
+    login_url = 'https://dnabet.vip/login'
+    username = 'Gargoyle007'
+    password = 'Gg123456'
 
-# If the worksheet is not found, create a new one
-if worksheet is None:
-    worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows="100", cols="20")
+    if not login_to_website(driver, username, password, login_url):
+        print("Login failure.")
+        driver.quit()
+        return
 
-# Define the header names
-header_names = ["Data Time", "Huay 264", "Huay VIP 264", "LTO 264", "LTO VIP 264 ", "ชัดเจน 264", "ชัดเจน VIP 264"]
-total_data = [header_names]
-
-# Check if the worksheet is empty (no header row) and add headers if needed
-existing_headers = worksheet.row_values(1)
-if not existing_headers:
-    worksheet.insert_row(header_names, index=1)
-
-# Chrome options for headless mode
-chrome_options = Options()
-chrome_options.add_argument("--headless")
-
-# URL of the login page
-login_url = 'https://dnabet.vip/login'
-
-# Your login credentials
-username = 'Gargoyle007'
-password = 'Gg123456'
-
-service = Service(executable_path='chromedriver.exe')
-driver = webdriver.Chrome(options=chrome_options)
-
-# Login to the website
-if not login_to_website(driver, username, password, login_url):
-    print("Exiting due to login failure.")
-    driver.quit()
-    exit()
-
-# Main loop for data extraction
-while True:
-    try:
-        # Navigate to the data URL
-        driver.get("https://dnabet.vip/lotto/result")
-        time.sleep(10)
-
-        # Wait for the page to load and for a specific element to be present
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, 'result-container')))
-
-        # Extract the data
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, 'html.parser')
-        div_elements = soup.find_all('div', class_='sc-9e723fdc-0 krDVwH undefined card border-gradient !lg:p-[20px] !p-[10px]')
-        order = [8, 9, 16, 17, 12, 13]
-        data = []
-        data_com = []
-        current_datetime = datetime.now()
-
-        # Format the date and time as YYYY-MM-DD HH:MM
-        data_time = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
-        data.append(data_time)
-
-        for item in order:
-            # Check if the index 'item' is within the range of 'div_elements'
-            if item < len(div_elements):
-                div_element = div_elements[item]
-                span_element = div_element.find('span', class_='ant-typography text-[0.85rem] lg:text-[1rem]')
-                divs_font_numeral = div_element.find_all('strong')
-
-                # Check if the necessary elements are found
-                if span_element and len(divs_font_numeral) >= 2:
-                    value_1 = span_element.get_text().split(" ")[-1]
-                    value_2 = divs_font_numeral[3].get_text()
-                    value_3 = divs_font_numeral[4].get_text()
-
-                    data.append(value_1)
-                    data.append(value_2)
-                    data.append(value_3)
-                    data_com.append(value_1)
-                    data_com.append(value_2)
-                    data_com.append(value_3)
-                else:
-                    print(f"Required elements not found for item at index {item}.")
-            else:
-                print(f"Index {item} is out of range for 'div_elements'.")
-
-        print(data)
+    while True:
         try:
-            if data_com != total_data[-1] and len(data) >= 19:
+            driver.get("https://dnabet.vip/lotto/result")
+            time.sleep(5)
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, 'result-container')))
+            page_source = driver.page_source
+            soup = BeautifulSoup(page_source, 'html.parser')
+            div_elements = soup.find_all('div', class_='sc-9e723fdc-0 krDVwH undefined card border-gradient !lg:p-[20px] !p-[10px]')
+            order = [8, 9, 16, 17, 12, 13]
+            data = [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+            data_com = []   
+            for item in order:
+                if item < len(div_elements):
+                    div_element = div_elements[item]
+                    span_element = div_element.find('span', class_='ant-typography text-[0.85rem] lg:text-[1rem]')
+                    divs_font_numeral = div_element.find_all('strong')
+                    if span_element and len(divs_font_numeral) >= 2:
+                        data.extend([span_element.get_text().split(" ")[-1], divs_font_numeral[3].get_text(), divs_font_numeral[4].get_text()])
+                        data_com.extend([span_element.get_text().split(" ")[-1], divs_font_numeral[3].get_text(), divs_font_numeral[4].get_text()])
+            if len(data) >= 19 and data_com != total_data[-1]:
                 total_data.append(data_com)
                 safe_append_to_worksheet(worksheet, data)
+            print(data)            
+
+            time.sleep(duration)
+        except TimeoutException as e:
+            print(f"Timeout error: {e}. Attempting re-login.")
+            while not login_to_website(driver, username, password, login_url):
+                print("Re-login failed. Retrying...")
+                time.sleep(10)  # Waiting before retrying
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"Error: {e}. Attempting re-login.")
+            while not login_to_website(driver, username, password, login_url):
+                print("Re-login failed. Retrying...")
+                time.sleep(10)  # Waiting before retrying
 
-        # Wait for the specified duration before repeating
-        time.sleep(duration)
+    driver.quit()
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-        # Attempt to log in again if an error occurs
-        if not login_to_website(driver, username, password, login_url):
-            print("Exiting due to login failure.")
-            break
-
-        # Wait for a while before retrying
-        time.sleep(10)
+if __name__ == "__main__":
+    main()
