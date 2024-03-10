@@ -4,6 +4,10 @@
 
 This Python script automates the extraction of lottery result data from the DNA Bet website and logs it into a Google Sheets document. It utilizes Selenium, BeautifulSoup, and gspread libraries for web scraping and data management.
 
+## Video Preview
+
+[![Video Preview](https://github.com/DevRex-0201/Project-Images/blob/main/video%20preview/Py-DNA-Bet-Data-Scraping.png)](https://drive.google.com/file/d/1p2l2MHc4DB4CBRd-Ll9WorAQEu8YNAYN/view?usp=drive_link)
+
 ## Table of Contents
 
 - [Features](#features)
